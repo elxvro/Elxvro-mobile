@@ -1,3 +1,0 @@
-ELXVRO App v1.0.0
-Web reference: ELXVRO Web v4.7.1
-Package: com.elxvro.app
