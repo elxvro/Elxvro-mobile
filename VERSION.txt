@@ -1,0 +1,3 @@
+ELXVRO App v1.0.1
+Web reference: ELXVRO Web v4.7.1
+GitHub Actions Flutter APK build fix.
