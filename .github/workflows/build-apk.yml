@@ -1,0 +1,109 @@
+name: ELXVRO APK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "elxvro-app.zip"
+      - ".github/workflows/build-apk.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository dosyalarini al
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter surumunu kontrol et
+        run: flutter --version
+
+      - name: ZIP dosyasini kontrol et
+        run: |
+          if [ ! -f "elxvro-app.zip" ]; then
+            echo "HATA: elxvro-app.zip bulunamadi."
+            exit 1
+          fi
+
+      - name: ZIP dosyasini ac
+        run: |
+          rm -rf app_source
+          mkdir -p app_source
+          unzip -q elxvro-app.zip -d app_source
+
+          echo "ZIP acildi."
+          find app_source -maxdepth 3 -type f | head -100
+
+      - name: Flutter proje klasorunu bul
+        id: project
+        shell: bash
+        run: |
+          PUBSPEC=$(find app_source -name pubspec.yaml -type f | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "HATA: ZIP icinde pubspec.yaml bulunamadi."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter proje klasoru: $PROJECT_DIR"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Android proje dosyalarini hazirla
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter create \
+            --platforms=android \
+            --org=com.elxvro \
+            --project-name=elxvro \
+            .
+
+      - name: Flutter paketlerini yukle
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: flutter pub get
+
+      - name: Flutter analizi
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: flutter analyze
+        continue-on-error: true
+
+      - name: Release APK olustur
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter build apk \
+            --release \
+            --build-name=1.0.0 \
+            --build-number=${{ github.run_number }}
+
+      - name: APK dosyasini kontrol et
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          ls -lah build/app/outputs/flutter-apk/
+
+          if [ ! -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            echo "HATA: APK olusturulamadi."
+            exit 1
+          fi
+
+      - name: APK artifact olarak yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ELXVRO-APK
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
