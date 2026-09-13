@@ -1,0 +1,87 @@
+name: Build ELXVRO Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Start APK build
+        id: eas_build
+        run: |
+          eas build \
+            --platform android \
+            --profile apk \
+            --non-interactive \
+            --no-wait \
+            --json > eas-build.json
+
+          BUILD_ID=$(jq -r 'if type == "array" then .[0].id else .id end' eas-build.json)
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for build
+        env:
+          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+        run: |
+          for attempt in $(seq 1 120); do
+            eas build:view "$BUILD_ID" --json > build-status.json
+            STATUS=$(jq -r '.status // empty' build-status.json)
+
+            if [ "$STATUS" = "FINISHED" ]; then
+              exit 0
+            fi
+
+            if [ "$STATUS" = "ERRORED" ] || [ "$STATUS" = "CANCELED" ]; then
+              exit 1
+            fi
+
+            sleep 30
+          done
+
+          exit 1
+
+      - name: Download APK
+        env:
+          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+        run: |
+          eas build:view "$BUILD_ID" --json > build-result.json
+          APK_URL=$(jq -r '.artifacts.buildUrl' build-result.json)
+
+          curl --fail --location "$APK_URL" --output ELXVRO.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          path: ELXVRO.apk
+          archive: false
+          retention-days: 14
