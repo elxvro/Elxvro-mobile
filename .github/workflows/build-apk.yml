@@ -1,87 +1,161 @@
-name: Build ELXVRO Android APK
+name: APK oluştur
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
 jobs:
   build-apk:
+    name: ELXVRO APK oluştur
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
     steps:
+      # 1. Repository dosyalarını al
       - name: Checkout
         uses: actions/checkout@v7
 
+      # 2. Node.js kurulumu
+      # package-lock.json olmadığı için npm cache KAPALI
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: '22.x'
-          cache: npm
+          node-version: "22.x"
+          package-manager-cache: false
 
+      # 3. Node ve npm sürümlerini göster
+      - name: Node sürümünü kontrol et
+        run: |
+          node --version
+          npm --version
+
+      # 4. Bağımlılıkları yükle
+      # package-lock.json olmadığı için npm ci kullanmıyoruz
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
+      # 5. TypeScript kontrolü
+      # typecheck script'i varsa çalışır, yoksa build'i durdurmaz
       - name: TypeScript check
-        run: npm run typecheck
+        run: npm run typecheck --if-present
 
+      # 6. EXPO_TOKEN kontrolü
+      - name: EXPO_TOKEN kontrolü
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "HATA: GitHub Secrets içinde EXPO_TOKEN bulunamadı."
+            echo "Settings > Secrets and variables > Actions > New repository secret"
+            exit 1
+          fi
+
+      # 7. Expo / EAS kurulumu ve Expo hesabına giriş
       - name: Setup EAS
-        uses: expo/expo-github-action@v9
+        uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      # 8. EAS hesabını kontrol et
+      - name: Expo hesabını kontrol et
+        run: eas whoami
+
+      # 9. Android APK build başlat ve bitmesini bekle
       - name: Start APK build
-        id: eas_build
+        shell: bash
         run: |
+          set -e
+
           eas build \
             --platform android \
             --profile apk \
             --non-interactive \
-            --no-wait \
+            --wait \
             --json > eas-build.json
 
-          BUILD_ID=$(jq -r 'if type == "array" then .[0].id else .id end' eas-build.json)
-          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "EAS build tamamlandı."
 
-      - name: Wait for build
-        env:
-          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+      # 10. Build sonucunu kontrol et
+      - name: Build sonucunu kontrol et
+        shell: bash
         run: |
-          for attempt in $(seq 1 120); do
-            eas build:view "$BUILD_ID" --json > build-status.json
-            STATUS=$(jq -r '.status // empty' build-status.json)
+          echo "EAS build sonucu:"
+          cat eas-build.json
 
-            if [ "$STATUS" = "FINISHED" ]; then
-              exit 0
-            fi
+          BUILD_STATUS=$(jq -r '
+            if type == "array"
+            then .[0].status
+            else .status
+            end
+          ' eas-build.json)
 
-            if [ "$STATUS" = "ERRORED" ] || [ "$STATUS" = "CANCELED" ]; then
-              exit 1
-            fi
+          echo "Build status: $BUILD_STATUS"
 
-            sleep 30
-          done
+          if [ "$BUILD_STATUS" != "FINISHED" ]; then
+            echo "HATA: EAS build başarıyla tamamlanmadı."
+            exit 1
+          fi
 
-          exit 1
+      # 11. APK indirme adresini bul
+      - name: APK adresini bul
+        id: apk
+        shell: bash
+        run: |
+          APK_URL=$(jq -r '
+            if type == "array" then
+              (
+                .[0].artifacts.buildUrl //
+                .[0].artifacts.applicationArchiveUrl //
+                empty
+              )
+            else
+              (
+                .artifacts.buildUrl //
+                .artifacts.applicationArchiveUrl //
+                empty
+              )
+            end
+          ' eas-build.json)
 
+          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
+            echo "HATA: APK indirme adresi bulunamadı."
+            cat eas-build.json
+            exit 1
+          fi
+
+          echo "APK adresi bulundu."
+          echo "url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      # 12. APK dosyasını GitHub runner'a indir
       - name: Download APK
+        shell: bash
         env:
-          BUILD_ID: ${{ steps.eas_build.outputs.build_id }}
+          APK_URL: ${{ steps.apk.outputs.url }}
         run: |
-          eas build:view "$BUILD_ID" --json > build-result.json
-          APK_URL=$(jq -r '.artifacts.buildUrl' build-result.json)
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --output ELXVRO.apk \
+            "$APK_URL"
 
-          curl --fail --location "$APK_URL" --output ELXVRO.apk
+          if [ ! -s ELXVRO.apk ]; then
+            echo "HATA: ELXVRO.apk indirilemedi veya dosya boş."
+            exit 1
+          fi
 
+          echo "APK başarıyla indirildi:"
+          ls -lh ELXVRO.apk
+
+      # 13. APK'yı GitHub Actions çıktısına yükle
       - name: Upload APK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v5
         with:
+          name: ELXVRO-APK
           path: ELXVRO.apk
-          archive: false
+          if-no-files-found: error
           retention-days: 14
