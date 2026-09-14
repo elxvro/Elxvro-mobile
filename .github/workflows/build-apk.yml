@@ -454,9 +454,19 @@ jobs:
           APK=build/app/outputs/flutter-apk/app-release.apk
           test -f "$APK" || { echo "HATA: APK olusmadi"; exit 1; }
           $ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner verify --print-certs "$APK" | tee /tmp/apk-cert.txt
-          grep -qi '0e:2b:66:85:9e:1b:d1:c4:7a:f4:1d:c6:93:fb:a4:a0:9f:99:51:53' /tmp/apk-cert.txt || {
-            echo "HATA: APK beklenen Google OAuth SHA-1 ile imzalanmadi"; exit 1;
-          }
+
+          EXPECTED_SHA1_NORMALIZED="6b2470eb308561a730a0ca1bcaed649e1f7c9c4f"
+          ACTUAL_SHA1_NORMALIZED=$(awk -F': ' '/certificate SHA-1 digest:/ {print tolower($2); exit}' /tmp/apk-cert.txt | tr -d ':[:space:]')
+
+          echo "Beklenen APK SHA-1: $EXPECTED_SHA1_NORMALIZED"
+          echo "Bulunan  APK SHA-1: $ACTUAL_SHA1_NORMALIZED"
+
+          if [ "$ACTUAL_SHA1_NORMALIZED" != "$EXPECTED_SHA1_NORMALIZED" ]; then
+            echo "HATA: APK beklenen Google OAuth SHA-1 ile imzalanmadi"
+            exit 1
+          fi
+
+          echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
           cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.1.apk
 
       - name: APK artifact olarak yukle
