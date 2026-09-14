@@ -45,6 +45,9 @@ jobs:
           mkdir -p app_source
           unzip -q elxvro-app.zip -d app_source
 
+          echo "ZIP acildi."
+          find app_source -maxdepth 3 -type f | head -100
+
       - name: Flutter proje klasorunu bul
         id: project
         shell: bash
@@ -61,22 +64,18 @@ jobs:
           echo "Proje klasoru: $PROJECT_DIR"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Eski Android yapisini tamamen temizle
+      - name: Android projesini sifirdan olustur
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           rm -rf android
-          echo "Eski Android klasoru temizlendi."
 
-      - name: Yeni Android v2 projesini olustur
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
           flutter create \
             --platforms=android \
             --org=com.elxvro \
             --project-name=elxvro \
             .
 
-      - name: Internet iznini ekle
+      - name: Android izinlerini ekle
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
@@ -86,10 +85,21 @@ jobs:
           path = Path("android/app/src/main/AndroidManifest.xml")
           text = path.read_text(encoding="utf-8")
 
-          if "android.permission.INTERNET" not in text:
-              end = text.find(">") + 1
-              permission = '\n    <uses-permission android:name="android.permission.INTERNET"/>'
-              text = text[:end] + permission + text[end:]
+          permissions = [
+              '<uses-permission android:name="android.permission.INTERNET"/>',
+              '<uses-permission android:name="android.permission.SET_WALLPAPER"/>',
+          ]
+
+          insert_at = text.find(">") + 1
+
+          additions = []
+
+          for permission in permissions:
+              if permission not in text:
+                  additions.append("\n    " + permission)
+
+          if additions:
+              text = text[:insert_at] + "".join(additions) + text[insert_at:]
 
           text = text.replace(
               'android:label="elxvro"',
@@ -97,8 +107,230 @@ jobs:
           )
 
           path.write_text(text, encoding="utf-8")
+
           print(text)
           PY
+
+      - name: Android duvar kagidi modulunu ekle
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          MAIN_ACTIVITY=$(find android/app/src/main/kotlin -name MainActivity.kt -type f | head -n 1)
+
+          if [ -z "$MAIN_ACTIVITY" ]; then
+            echo "HATA: MainActivity.kt bulunamadi."
+            exit 1
+          fi
+
+          cat > "$MAIN_ACTIVITY" <<'KOTLIN'
+          package com.elxvro.elxvro
+
+          import android.app.WallpaperManager
+          import android.os.Build
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.io.IOException
+          import java.net.HttpURLConnection
+          import java.net.URL
+
+          class MainActivity : FlutterActivity() {
+
+              private val channelName = "com.elxvro/wallpaper"
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+
+                  MethodChannel(
+                      flutterEngine.dartExecutor.binaryMessenger,
+                      channelName
+                  ).setMethodCallHandler { call, result ->
+
+                      when (call.method) {
+
+                          "setWallpaper" -> {
+
+                              val imageUrl = call.argument<String>("url")
+                              val target = call.argument<String>("target") ?: "home"
+
+                              if (imageUrl.isNullOrBlank()) {
+
+                                  result.error(
+                                      "INVALID_URL",
+                                      "Gorsel adresi bulunamadi.",
+                                      null
+                                  )
+
+                              } else {
+
+                                  setWallpaperFromUrl(
+                                      imageUrl,
+                                      target,
+                                      result
+                                  )
+                              }
+                          }
+
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun setWallpaperFromUrl(
+                  imageUrl: String,
+                  target: String,
+                  result: MethodChannel.Result
+              ) {
+
+                  Thread {
+
+                      var connection: HttpURLConnection? = null
+
+                      try {
+
+                          connection =
+                              URL(imageUrl).openConnection() as HttpURLConnection
+
+                          connection.instanceFollowRedirects = true
+                          connection.connectTimeout = 20000
+                          connection.readTimeout = 45000
+
+                          connection.setRequestProperty(
+                              "User-Agent",
+                              "ELXVRO-Android/1.0"
+                          )
+
+                          connection.setRequestProperty(
+                              "Accept",
+                              "image/*"
+                          )
+
+                          connection.connect()
+
+                          if (connection.responseCode !in 200..299) {
+
+                              throw IOException(
+                                  "Gorsel indirilemedi. HTTP ${connection.responseCode}"
+                              )
+                          }
+
+                          val wallpaperManager =
+                              WallpaperManager.getInstance(applicationContext)
+
+                          connection.inputStream.use { input ->
+
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+
+                                  val which = when (target) {
+
+                                      "home" ->
+                                          WallpaperManager.FLAG_SYSTEM
+
+                                      "lock" ->
+                                          WallpaperManager.FLAG_LOCK
+
+                                      "both" ->
+                                          WallpaperManager.FLAG_SYSTEM or
+                                          WallpaperManager.FLAG_LOCK
+
+                                      else ->
+                                          WallpaperManager.FLAG_SYSTEM
+                                  }
+
+                                  val wallpaperId =
+                                      wallpaperManager.setStream(
+                                          input,
+                                          null,
+                                          true,
+                                          which
+                                      )
+
+                                  if (wallpaperId == 0) {
+
+                                      throw IOException(
+                                          "Android duvar kagidini uygulayamadi."
+                                      )
+                                  }
+
+                              } else {
+
+                                  if (target == "lock") {
+
+                                      throw UnsupportedOperationException(
+                                          "Bu Android surumunde kilit ekrani ayri degistirilemiyor."
+                                      )
+                                  }
+
+                                  wallpaperManager.setStream(input)
+                              }
+                          }
+
+                          runOnUiThread {
+                              result.success(true)
+                          }
+
+                      } catch (error: Exception) {
+
+                          val code =
+                              if (error is UnsupportedOperationException) {
+                                  "UNSUPPORTED"
+                              } else {
+                                  "SET_FAILED"
+                              }
+
+                          runOnUiThread {
+
+                              result.error(
+                                  code,
+                                  error.message
+                                      ?: "Duvar kagidi ayarlanamadi.",
+                                  null
+                              )
+                          }
+
+                      } finally {
+
+                          connection?.disconnect()
+                      }
+                  }.start()
+              }
+          }
+          KOTLIN
+
+          echo "MainActivity duvar kagidi moduluyle guncellendi."
+          cat "$MAIN_ACTIVITY"
+
+      - name: Izinleri kontrol et
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+
+          if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+            echo "HATA: INTERNET izni yok."
+            exit 1
+          fi
+
+          if ! grep -q "android.permission.SET_WALLPAPER" "$MANIFEST"; then
+            echo "HATA: SET_WALLPAPER izni yok."
+            exit 1
+          fi
+
+          echo "Android izinleri tamam."
+
+      - name: Wallpaper modulunu kontrol et
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          if ! grep -R -q 'com.elxvro/wallpaper' android/app/src/main/kotlin; then
+            echo "HATA: Wallpaper MethodChannel bulunamadi."
+            exit 1
+          fi
+
+          if ! grep -R -q 'WallpaperManager' android/app/src/main/kotlin; then
+            echo "HATA: WallpaperManager bulunamadi."
+            exit 1
+          fi
+
+          echo "Wallpaper modulu tamam."
 
       - name: Flutter paketlerini yukle
         working-directory: ${{ steps.project.outputs.dir }}
@@ -107,14 +339,13 @@ jobs:
       - name: Flutter analizi
         working-directory: ${{ steps.project.outputs.dir }}
         run: flutter analyze
-        continue-on-error: true
 
       - name: Release APK olustur
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter build apk \
             --release \
-            --build-name=1.0.6 \
+            --build-name=1.0.7 \
             --build-number=${{ github.run_number }}
 
       - name: APK kontrolu
@@ -132,12 +363,12 @@ jobs:
         run: |
           cp \
             build/app/outputs/flutter-apk/app-release.apk \
-            build/app/outputs/flutter-apk/ELXVRO-v1.0.6.apk
+            build/app/outputs/flutter-apk/ELXVRO-v1.0.7.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.0.6
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.0.6.apk
+          name: ELXVRO-APK-v1.0.7
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.0.7.apk
           if-no-files-found: error
           retention-days: 30
