@@ -1,4 +1,4 @@
-name: ELXVRO v1.1.9 Wallpaper Resolve Fix APK Build
+name: ELXVRO v1.2.0 Server API APK Build
 
 on:
   workflow_dispatch:
@@ -90,7 +90,7 @@ jobs:
 
           cat > "$MAIN_ACTIVITY" <<'KOTLIN'
           package com.elxvro.elxvro
-
+          
           import android.app.WallpaperManager
           import android.content.Intent
           import android.graphics.Bitmap
@@ -107,33 +107,30 @@ jobs:
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
           import java.io.File
-          import java.io.FileInputStream
           import java.io.FileOutputStream
           import java.io.IOException
-          import java.net.HttpURLConnection
-          import java.net.URL
           import java.security.MessageDigest
           import kotlin.math.max
           import kotlin.math.roundToInt
-
+          
           class MainActivity : FlutterActivity() {
               private val wallpaperChannelName = "com.elxvro/wallpaper"
               private val browserChannelName = "com.elxvro/browser"
-
+          
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
-
+          
                   MethodChannel(
                       flutterEngine.dartExecutor.binaryMessenger,
                       wallpaperChannelName
                   ).setMethodCallHandler { call, result ->
                       when (call.method) {
-                          "prepareWallpaper" -> {
-                              val imageUrl = call.argument<String>("url")
-                              if (imageUrl.isNullOrBlank()) {
-                                  result.error("INVALID_URL", "Gorsel adresi bulunamadi.", null)
+                          "prepareWallpaperFile" -> {
+                              val filePath = call.argument<String>("path")
+                              if (filePath.isNullOrBlank()) {
+                                  result.error("INVALID_PATH", "Onbellek gorseli bulunamadi.", null)
                               } else {
-                                  prepareWallpaper(imageUrl, result)
+                                  prepareWallpaperFile(filePath, result)
                               }
                           }
                           "setWallpaperPrepared" -> {
@@ -145,19 +142,10 @@ jobs:
                                   setWallpaperPrepared(preparedPath, target, result)
                               }
                           }
-                          "setWallpaper" -> {
-                              val imageUrl = call.argument<String>("url")
-                              val target = call.argument<String>("target") ?: "home"
-                              if (imageUrl.isNullOrBlank()) {
-                                  result.error("INVALID_URL", "Gorsel adresi bulunamadi.", null)
-                              } else {
-                                  setWallpaperFromUrl(imageUrl, target, result)
-                              }
-                          }
                           else -> result.notImplemented()
                       }
                   }
-
+          
                   MethodChannel(
                       flutterEngine.dartExecutor.binaryMessenger,
                       browserChannelName
@@ -185,64 +173,18 @@ jobs:
                       }
                   }
               }
-
+          
               private fun cacheKey(value: String): String {
                   val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
                   return digest.joinToString("") { "%02x".format(it) }
               }
-
-              private fun rawCacheFile(url: String): File {
-                  val dir = File(cacheDir, "wallpapers")
-                  if (!dir.exists()) dir.mkdirs()
-                  return File(dir, "${cacheKey(url)}.img")
-              }
-
-              private fun preparedCacheFile(url: String, width: Int, height: Int): File {
+          
+              private fun preparedCacheFile(identity: String, width: Int, height: Int): File {
                   val dir = File(cacheDir, "wallpapers_prepared")
                   if (!dir.exists()) dir.mkdirs()
-                  return File(dir, "${cacheKey("$url|$width|$height")}.jpg")
+                  return File(dir, "${cacheKey("$identity|$width|$height")}.jpg")
               }
-
-              private fun ensureRawCached(url: String): File {
-                  val file = rawCacheFile(url)
-                  synchronized(file.absolutePath.intern()) {
-                      if (file.exists() && file.length() > 512) {
-                          file.setLastModified(System.currentTimeMillis())
-                          return file
-                      }
-
-                      var connection: HttpURLConnection? = null
-                      val temp = File(file.absolutePath + ".tmp")
-                      try {
-                          connection = URL(url).openConnection() as HttpURLConnection
-                          connection.instanceFollowRedirects = true
-                          connection.connectTimeout = 12000
-                          connection.readTimeout = 40000
-                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.9")
-                          connection.setRequestProperty("Accept", "image/*")
-                          connection.connect()
-                          if (connection.responseCode !in 200..299) {
-                              throw IOException("Gorsel indirilemedi (HTTP ${connection.responseCode}).")
-                          }
-                          connection.inputStream.use { input ->
-                              FileOutputStream(temp).use { output -> input.copyTo(output, 128 * 1024) }
-                          }
-                          if (temp.length() <= 512) throw IOException("Gorsel dosyasi gecersiz.")
-                          if (file.exists()) file.delete()
-                          if (!temp.renameTo(file)) {
-                              temp.copyTo(file, overwrite = true)
-                              temp.delete()
-                          }
-                          file.setLastModified(System.currentTimeMillis())
-                          pruneWallpaperCache()
-                          return file
-                      } finally {
-                          temp.takeIf { it.exists() && !file.exists() }?.delete()
-                          connection?.disconnect()
-                      }
-                  }
-              }
-
+          
               private fun getWallpaperViewportSize(): Pair<Int, Int> {
                   return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                       val wm = getSystemService(WindowManager::class.java)
@@ -254,14 +196,14 @@ jobs:
                       Pair(metrics.widthPixels.coerceAtLeast(1), metrics.heightPixels.coerceAtLeast(1))
                   }
               }
-
+          
               private fun decodeSampled(file: File, targetWidth: Int, targetHeight: Int): Bitmap {
                   val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                   BitmapFactory.decodeFile(file.absolutePath, bounds)
                   if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
                       throw IOException("Gorsel boyutlari okunamadi.")
                   }
-
+          
                   var sample = 1
                   while (
                       bounds.outWidth / (sample * 2) >= targetWidth &&
@@ -269,7 +211,7 @@ jobs:
                   ) {
                       sample *= 2
                   }
-
+          
                   val options = BitmapFactory.Options().apply {
                       inSampleSize = sample
                       inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -277,7 +219,7 @@ jobs:
                   return BitmapFactory.decodeFile(file.absolutePath, options)
                       ?: throw IOException("Gorsel Android tarafindan okunamadi.")
               }
-
+          
               private fun centerCropToScreen(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
                   val output = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(output)
@@ -298,17 +240,34 @@ jobs:
                   )
                   return output
               }
-
-              private fun ensurePrepared(url: String): File {
+          
+              private fun prunePreparedCache(maxBytes: Long = 300L * 1024L * 1024L) {
+                  val dir = File(cacheDir, "wallpapers_prepared")
+                  val files = dir.listFiles()?.filter { it.isFile && !it.name.endsWith(".tmp") }
+                      ?.sortedBy { it.lastModified() } ?: emptyList()
+                  var total = files.sumOf { it.length() }
+                  for (file in files) {
+                      if (total <= maxBytes) break
+                      val size = file.length()
+                      if (file.delete()) total -= size
+                  }
+              }
+          
+              private fun ensurePreparedFromLocal(filePath: String): File {
+                  val raw = File(filePath)
+                  if (!raw.exists() || !raw.isFile || raw.length() <= 512) {
+                      throw IOException("Onbellek gorseli gecersiz.")
+                  }
+          
                   val (screenWidth, screenHeight) = getWallpaperViewportSize()
-                  val prepared = preparedCacheFile(url, screenWidth, screenHeight)
+                  val identity = "local:${raw.absolutePath}:${raw.length()}:${raw.lastModified()}"
+                  val prepared = preparedCacheFile(identity, screenWidth, screenHeight)
                   synchronized(prepared.absolutePath.intern()) {
                       if (prepared.exists() && prepared.length() > 1024) {
                           prepared.setLastModified(System.currentTimeMillis())
                           return prepared
                       }
-
-                      val raw = ensureRawCached(url)
+          
                       val source = decodeSampled(raw, screenWidth, screenHeight)
                       val fitted = centerCropToScreen(source, screenWidth, screenHeight)
                       val temp = File(prepared.absolutePath + ".tmp")
@@ -325,7 +284,7 @@ jobs:
                               temp.delete()
                           }
                           prepared.setLastModified(System.currentTimeMillis())
-                          pruneWallpaperCache()
+                          prunePreparedCache()
                           return prepared
                       } finally {
                           temp.takeIf { it.exists() && !prepared.exists() }?.delete()
@@ -334,66 +293,51 @@ jobs:
                       }
                   }
               }
-
-              private fun pruneWallpaperCache(maxBytes: Long = 300L * 1024L * 1024L) {
-                  val dirs = listOf(File(cacheDir, "wallpapers"), File(cacheDir, "wallpapers_prepared"))
-                  val files = dirs.flatMap { dir ->
-                      dir.listFiles()?.filter { it.isFile && !it.name.endsWith(".tmp") } ?: emptyList()
-                  }.sortedBy { it.lastModified() }
-
-                  var total = files.sumOf { it.length() }
-                  for (file in files) {
-                      if (total <= maxBytes) break
-                      val size = file.length()
-                      if (file.delete()) total -= size
-                  }
-              }
-
-              private fun prepareWallpaper(imageUrl: String, result: MethodChannel.Result) {
+          
+              private fun prepareWallpaperFile(filePath: String, result: MethodChannel.Result) {
                   Thread {
                       try {
-                          val prepared = ensurePrepared(imageUrl)
+                          val prepared = ensurePreparedFromLocal(filePath)
                           runOnUiThread { result.success(prepared.absolutePath) }
                       } catch (error: Exception) {
                           runOnUiThread {
-                              result.error("CACHE_FAILED", error.message ?: "Gorsel onbellege alinamadi.", null)
+                              result.error("PREPARE_FAILED", error.message ?: "Gorsel hazirlanamadi.", null)
                           }
                       }
                   }.start()
               }
-
-              private fun setWallpaperPrepared(preparedPath: String, target: String, result: MethodChannel.Result) {
+          
+              private fun setWallpaperPrepared(
+                  preparedPath: String,
+                  target: String,
+                  result: MethodChannel.Result
+              ) {
                   Thread {
                       try {
-                          val file = File(preparedPath)
-                          if (!file.exists() || file.length() <= 4096) {
+                          val prepared = File(preparedPath)
+                          if (!prepared.exists() || prepared.length() <= 1024) {
                               throw IOException("Hazir duvar kagidi dosyasi bulunamadi.")
                           }
-                          file.setLastModified(System.currentTimeMillis())
-
+          
                           val manager = WallpaperManager.getInstance(applicationContext)
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                              val which = when (target) {
-                                  "home" -> WallpaperManager.FLAG_SYSTEM
-                                  "lock" -> WallpaperManager.FLAG_LOCK
-                                  "both" -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
-                                  else -> WallpaperManager.FLAG_SYSTEM
+                          prepared.inputStream().use { input ->
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                  val which = when (target) {
+                                      "home" -> WallpaperManager.FLAG_SYSTEM
+                                      "lock" -> WallpaperManager.FLAG_LOCK
+                                      "both" -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+                                      else -> WallpaperManager.FLAG_SYSTEM
+                                  }
+                                  val id = manager.setStream(input, null, false, which)
+                                  if (id == 0) throw IOException("Android duvar kagidini uygulayamadi.")
+                              } else {
+                                  if (target == "lock") {
+                                      throw UnsupportedOperationException(
+                                          "Bu Android surumu kilit ekranini ayri degistirmeyi desteklemiyor."
+                                      )
+                                  }
+                                  manager.setStream(input)
                               }
-                              val (screenWidth, screenHeight) = getWallpaperViewportSize()
-                              val viewport = Rect(0, 0, screenWidth, screenHeight)
-                              val wallpaperId = FileInputStream(file).use { input ->
-                                  manager.setStream(input, viewport, false, which)
-                              }
-                              if (wallpaperId == 0) {
-                                  throw IOException("Android duvar kagidini uygulayamadi.")
-                              }
-                          } else {
-                              if (target == "lock") {
-                                  throw UnsupportedOperationException(
-                                      "Bu Android surumu kilit ekranini ayri degistirmeyi desteklemiyor."
-                                  )
-                              }
-                              FileInputStream(file).use { input -> manager.setStream(input) }
                           }
                           runOnUiThread { result.success(true) }
                       } catch (error: Exception) {
@@ -401,47 +345,6 @@ jobs:
                           runOnUiThread {
                               result.error(code, error.message ?: "Duvar kagidi ayarlanamadi.", null)
                           }
-                      }
-                  }.start()
-              }
-
-              private fun setWallpaperFromUrl(imageUrl: String, target: String, result: MethodChannel.Result) {
-                  Thread {
-                      var bitmap: Bitmap? = null
-                      try {
-                          val file = ensurePrepared(imageUrl)
-                          val loaded = BitmapFactory.decodeFile(file.absolutePath)
-                              ?: throw IOException("Hazir duvar kagidi okunamadi.")
-                          bitmap = loaded
-
-                          val manager = WallpaperManager.getInstance(applicationContext)
-                          val viewport = Rect(0, 0, loaded.width, loaded.height)
-
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                              val which = when (target) {
-                                  "home" -> WallpaperManager.FLAG_SYSTEM
-                                  "lock" -> WallpaperManager.FLAG_LOCK
-                                  "both" -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
-                                  else -> WallpaperManager.FLAG_SYSTEM
-                              }
-                              val id = manager.setBitmap(loaded, viewport, false, which)
-                              if (id == 0) throw IOException("Android duvar kagidini uygulayamadi.")
-                          } else {
-                              if (target == "lock") {
-                                  throw UnsupportedOperationException(
-                                      "Bu Android surumu kilit ekranini ayri degistirmeyi desteklemiyor."
-                                  )
-                              }
-                              manager.setBitmap(loaded)
-                          }
-                          runOnUiThread { result.success(true) }
-                      } catch (error: Exception) {
-                          val code = if (error is UnsupportedOperationException) "UNSUPPORTED" else "SET_FAILED"
-                          runOnUiThread {
-                              result.error(code, error.message ?: "Duvar kagidi ayarlanamadi.", null)
-                          }
-                      } finally {
-                          bitmap?.recycle()
                       }
                   }.start()
               }
@@ -577,7 +480,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.1.9 \
+            --build-name=1.2.0 \
             --build-number=${{ github.run_number }}
 
       - name: APK imzasini dogrula
@@ -599,12 +502,12 @@ jobs:
           fi
 
           echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.9.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.2.0.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.1.9
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.9.apk
+          name: ELXVRO-APK-v1.2.0
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.2.0.apk
           if-no-files-found: error
           retention-days: 30
