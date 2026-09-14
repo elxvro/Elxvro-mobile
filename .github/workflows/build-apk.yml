@@ -1,4 +1,4 @@
-name: ELXVRO v1.1.3 Performance APK Build
+name: ELXVRO v1.1.4 Wallpaper Fast APK Build
 
 on:
   workflow_dispatch:
@@ -107,6 +107,7 @@ jobs:
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
           import java.io.File
+          import java.io.FileInputStream
           import java.io.FileOutputStream
           import java.io.IOException
           import java.net.HttpURLConnection
@@ -133,6 +134,15 @@ jobs:
                                   result.error("INVALID_URL", "Gorsel adresi bulunamadi.", null)
                               } else {
                                   prepareWallpaper(imageUrl, result)
+                              }
+                          }
+                          "setWallpaperPrepared" -> {
+                              val preparedPath = call.argument<String>("path")
+                              val target = call.argument<String>("target") ?: "home"
+                              if (preparedPath.isNullOrBlank()) {
+                                  result.error("INVALID_PATH", "Hazir duvar kagidi bulunamadi.", null)
+                              } else {
+                                  setWallpaperPrepared(preparedPath, target, result)
                               }
                           }
                           "setWallpaper" -> {
@@ -208,7 +218,7 @@ jobs:
                           connection.instanceFollowRedirects = true
                           connection.connectTimeout = 12000
                           connection.readTimeout = 40000
-                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.3")
+                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.4")
                           connection.setRequestProperty("Accept", "image/*")
                           connection.connect()
                           if (connection.responseCode !in 200..299) {
@@ -304,7 +314,7 @@ jobs:
                       val temp = File(prepared.absolutePath + ".tmp")
                       try {
                           FileOutputStream(temp).use { output ->
-                              if (!fitted.compress(Bitmap.CompressFormat.JPEG, 94, output)) {
+                              if (!fitted.compress(Bitmap.CompressFormat.JPEG, 90, output)) {
                                   throw IOException("Hazir duvar kagidi kaydedilemedi.")
                               }
                           }
@@ -347,6 +357,49 @@ jobs:
                       } catch (error: Exception) {
                           runOnUiThread {
                               result.error("CACHE_FAILED", error.message ?: "Gorsel onbellege alinamadi.", null)
+                          }
+                      }
+                  }.start()
+              }
+
+              private fun setWallpaperPrepared(preparedPath: String, target: String, result: MethodChannel.Result) {
+                  Thread {
+                      try {
+                          val file = File(preparedPath)
+                          if (!file.exists() || file.length() <= 4096) {
+                              throw IOException("Hazir duvar kagidi dosyasi bulunamadi.")
+                          }
+                          file.setLastModified(System.currentTimeMillis())
+
+                          val manager = WallpaperManager.getInstance(applicationContext)
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                              val which = when (target) {
+                                  "home" -> WallpaperManager.FLAG_SYSTEM
+                                  "lock" -> WallpaperManager.FLAG_LOCK
+                                  "both" -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+                                  else -> WallpaperManager.FLAG_SYSTEM
+                              }
+                              val (screenWidth, screenHeight) = getWallpaperViewportSize()
+                              val viewport = Rect(0, 0, screenWidth, screenHeight)
+                              val wallpaperId = FileInputStream(file).use { input ->
+                                  manager.setStream(input, viewport, false, which)
+                              }
+                              if (wallpaperId == 0) {
+                                  throw IOException("Android duvar kagidini uygulayamadi.")
+                              }
+                          } else {
+                              if (target == "lock") {
+                                  throw UnsupportedOperationException(
+                                      "Bu Android surumu kilit ekranini ayri degistirmeyi desteklemiyor."
+                                  )
+                              }
+                              FileInputStream(file).use { input -> manager.setStream(input) }
+                          }
+                          runOnUiThread { result.success(true) }
+                      } catch (error: Exception) {
+                          val code = if (error is UnsupportedOperationException) "UNSUPPORTED" else "SET_FAILED"
+                          runOnUiThread {
+                              result.error(code, error.message ?: "Duvar kagidi ayarlanamadi.", null)
                           }
                       }
                   }.start()
@@ -524,7 +577,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.1.3 \
+            --build-name=1.1.4 \
             --build-number=${{ github.run_number }}
 
       - name: APK imzasini dogrula
@@ -546,12 +599,12 @@ jobs:
           fi
 
           echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.3.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.4.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.1.3
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.3.apk
+          name: ELXVRO-APK-v1.1.4
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.4.apk
           if-no-files-found: error
           retention-days: 30
