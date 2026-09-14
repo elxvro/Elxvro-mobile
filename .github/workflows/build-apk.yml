@@ -320,28 +320,17 @@ jobs:
         id: keystore
         working-directory: ${{ steps.project.outputs.dir }}
         env:
-          GH_TOKEN: ${{ github.token }}
           KEYSTORE_B64: ${{ secrets.ELXVRO_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ELXVRO_KEYSTORE_PASSWORD }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           test -n "$KEYSTORE_PASSWORD" || { echo "HATA: ELXVRO_KEYSTORE_PASSWORD secret eksik"; exit 1; }
+          test -n "$KEYSTORE_B64" || { echo "HATA: ELXVRO_KEYSTORE_BASE64 secret eksik"; exit 1; }
 
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 --decode > android/app/elxvro-release.jks
-            echo "Keystore GitHub secret'tan yuklendi."
-          else
-            echo "ELXVRO_KEYSTORE_BASE64 yok; son Release Key artifact'i deneniyor..."
-            cd "$GITHUB_WORKSPACE"
-            RUN_ID=$(gh run list --workflow generate-keystore.yml --limit 1 --json databaseId,conclusion --jq 'map(select(.conclusion=="success"))[0].databaseId // empty')
-            test -n "$RUN_ID" || { echo "HATA: basarili generate-keystore.yml run bulunamadi"; exit 1; }
-            rm -rf /tmp/elxvro-key && mkdir -p /tmp/elxvro-key
-            gh run download "$RUN_ID" -n ELXVRO-RELEASE-KEY -D /tmp/elxvro-key
-            KEYFILE=$(find /tmp/elxvro-key -name '*.jks' -type f | head -n 1)
-            test -n "$KEYFILE" || { echo "HATA: artifact icinde .jks yok"; exit 1; }
-            cp "$KEYFILE" "${{ steps.project.outputs.dir }}/android/app/elxvro-release.jks"
-          fi
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > android/app/elxvro-release.jks
+          test -s android/app/elxvro-release.jks || { echo "HATA: Keystore dosyasi olusturulamadi"; exit 1; }
+          echo "Keystore GitHub secret'tan yuklendi."
 
           keytool -list -v \
             -keystore android/app/elxvro-release.jks \
