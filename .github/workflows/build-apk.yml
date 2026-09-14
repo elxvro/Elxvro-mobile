@@ -1,4 +1,4 @@
-name: ELXVRO v1.1.7 Category Complete APK Build
+name: ELXVRO v1.1.8 Wallpaper Resolve Fix APK Build
 
 on:
   workflow_dispatch:
@@ -206,7 +206,7 @@ jobs:
               private fun ensureRawCached(url: String): File {
                   val file = rawCacheFile(url)
                   synchronized(file.absolutePath.intern()) {
-                      if (file.exists() && file.length() > 4096) {
+                      if (file.exists() && file.length() > 512) {
                           file.setLastModified(System.currentTimeMillis())
                           return file
                       }
@@ -218,8 +218,9 @@ jobs:
                           connection.instanceFollowRedirects = true
                           connection.connectTimeout = 12000
                           connection.readTimeout = 40000
-                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.7")
-                          connection.setRequestProperty("Accept", "image/*")
+                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.8")
+                          connection.setRequestProperty("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                          connection.setRequestProperty("Referer", "https://www.elxvro.com/")
                           connection.connect()
                           if (connection.responseCode !in 200..299) {
                               throw IOException("Gorsel indirilemedi (HTTP ${connection.responseCode}).")
@@ -227,7 +228,7 @@ jobs:
                           connection.inputStream.use { input ->
                               FileOutputStream(temp).use { output -> input.copyTo(output, 128 * 1024) }
                           }
-                          if (temp.length() <= 4096) throw IOException("Gorsel dosyasi gecersiz.")
+                          if (temp.length() <= 512) throw IOException("Gorsel dosyasi gecersiz.")
                           if (file.exists()) file.delete()
                           if (!temp.renameTo(file)) {
                               temp.copyTo(file, overwrite = true)
@@ -303,7 +304,7 @@ jobs:
                   val (screenWidth, screenHeight) = getWallpaperViewportSize()
                   val prepared = preparedCacheFile(url, screenWidth, screenHeight)
                   synchronized(prepared.absolutePath.intern()) {
-                      if (prepared.exists() && prepared.length() > 4096) {
+                      if (prepared.exists() && prepared.length() > 1024) {
                           prepared.setLastModified(System.currentTimeMillis())
                           return prepared
                       }
@@ -318,7 +319,7 @@ jobs:
                                   throw IOException("Hazir duvar kagidi kaydedilemedi.")
                               }
                           }
-                          if (temp.length() <= 4096) throw IOException("Hazir duvar kagidi gecersiz.")
+                          if (temp.length() <= 1024) throw IOException("Hazir duvar kagidi gecersiz.")
                           if (prepared.exists()) prepared.delete()
                           if (!temp.renameTo(prepared)) {
                               temp.copyTo(prepared, overwrite = true)
@@ -577,7 +578,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.1.7 \
+            --build-name=1.1.8 \
             --build-number=${{ github.run_number }}
 
       - name: APK imzasini dogrula
@@ -599,12 +600,12 @@ jobs:
           fi
 
           echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.7.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.8.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.1.7
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.7.apk
+          name: ELXVRO-APK-v1.1.8
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.8.apk
           if-no-files-found: error
           retention-days: 30
