@@ -1,4 +1,4 @@
-name: ELXVRO v1.2.1 Server API Test Fix APK Build
+name: ELXVRO v1.3.0 Visual Refresh APK Build
 
 on:
   workflow_dispatch:
@@ -80,6 +80,48 @@ jobs:
           text = text.replace('android:label="elxvro"', 'android:label="ELXVRO"')
           path.write_text(text, encoding='utf-8')
           PY
+
+      - name: ELXVRO uygulama ikonunu uygula
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for DENSITY in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            ICON="assets/branding/elxvro_icon_${DENSITY}.png"
+            test -s "$ICON" || { echo "HATA: ELXVRO $DENSITY ikon dosyasi bulunamadi"; exit 1; }
+            DIR="android/app/src/main/res/mipmap-$DENSITY"
+            mkdir -p "$DIR"
+            cp "$ICON" "$DIR/ic_launcher.png"
+          done
+
+          cat > android/app/src/main/res/drawable/launch_background.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="#07090E" />
+              <item>
+                  <bitmap android:gravity="center" android:src="@mipmap/ic_launcher" />
+              </item>
+          </layer-list>
+          XML
+
+          mkdir -p android/app/src/main/res/drawable-v21
+          cp android/app/src/main/res/drawable/launch_background.xml \
+             android/app/src/main/res/drawable-v21/launch_background.xml
+
+          mkdir -p android/app/src/main/res/values-v31
+          cat > android/app/src/main/res/values-v31/styles.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+                  <item name="android:forceDarkAllowed">false</item>
+                  <item name="android:windowSplashScreenBackground">#07090E</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+                  <item name="android:windowSplashScreenIconBackgroundColor">#07090E</item>
+                  <item name="android:windowLightStatusBar">false</item>
+              </style>
+          </resources>
+          XML
+          echo "ELXVRO launcher icon ve native splash uygulandi."
 
       - name: Wallpaper cache modulunu ekle
         working-directory: ${{ steps.project.outputs.dir }}
@@ -480,7 +522,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.2.1 \
+            --build-name=1.3.0 \
             --build-number=${{ github.run_number }}
 
       - name: APK imzasini dogrula
@@ -502,12 +544,12 @@ jobs:
           fi
 
           echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.2.1.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.3.0.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.2.1
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.2.1.apk
+          name: ELXVRO-APK-v1.3.0
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.3.0.apk
           if-no-files-found: error
           retention-days: 30
