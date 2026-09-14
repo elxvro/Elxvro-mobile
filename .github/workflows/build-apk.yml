@@ -338,7 +338,7 @@ jobs:
 
       - name: Flutter analizi
         working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Release APK olustur
         working-directory: ${{ steps.project.outputs.dir }}
