@@ -29,10 +29,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Flutter surumunu kontrol et
+      - name: Flutter surumunu goster
         run: flutter --version
 
-      - name: ZIP dosyasini kontrol et
+      - name: ZIP kontrolu
         run: |
           if [ ! -f "elxvro-app.zip" ]; then
             echo "HATA: elxvro-app.zip bulunamadi."
@@ -45,9 +45,6 @@ jobs:
           mkdir -p app_source
           unzip -q elxvro-app.zip -d app_source
 
-          echo "ZIP acildi."
-          find app_source -maxdepth 3 -type f | head -100
-
       - name: Flutter proje klasorunu bul
         id: project
         shell: bash
@@ -55,87 +52,55 @@ jobs:
           PUBSPEC=$(find app_source -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "HATA: ZIP icinde pubspec.yaml bulunamadi."
+            echo "HATA: pubspec.yaml bulunamadi."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter proje klasoru: $PROJECT_DIR"
+          echo "Proje klasoru: $PROJECT_DIR"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Android projesini hazirla
+      - name: Eski Android yapisini tamamen temizle
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          if [ ! -d "android" ]; then
-            echo "Android klasoru yok. Olusturuluyor..."
+          rm -rf android
+          echo "Eski Android klasoru temizlendi."
 
-            flutter create \
-              --platforms=android \
-              --org=com.elxvro \
-              --project-name=elxvro \
-              .
-          else
-            echo "Android klasoru zaten mevcut."
-          fi
+      - name: Yeni Android v2 projesini olustur
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter create \
+            --platforms=android \
+            --org=com.elxvro \
+            --project-name=elxvro \
+            .
 
-      - name: Android internet iznini garanti et
+      - name: Internet iznini ekle
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-
-          if [ ! -f "$MANIFEST" ]; then
-            echo "HATA: AndroidManifest.xml bulunamadi."
-            exit 1
-          fi
-
           python3 <<'PY'
           from pathlib import Path
 
           path = Path("android/app/src/main/AndroidManifest.xml")
           text = path.read_text(encoding="utf-8")
 
-          permission = '<uses-permission android:name="android.permission.INTERNET"/>'
+          if "android.permission.INTERNET" not in text:
+              end = text.find(">") + 1
+              permission = '\n    <uses-permission android:name="android.permission.INTERNET"/>'
+              text = text[:end] + permission + text[end:]
 
-          if permission not in text:
-              text = text.replace(
-                  "<manifest",
-                  "<manifest",
-                  1
-              )
+          text = text.replace(
+              'android:label="elxvro"',
+              'android:label="ELXVRO"'
+          )
 
-              pos = text.find(">")
-              text = (
-                  text[:pos + 1]
-                  + "\n    "
-                  + permission
-                  + text[pos + 1:]
-              )
-
-              path.write_text(text, encoding="utf-8")
-              print("INTERNET izni eklendi.")
-          else:
-              print("INTERNET izni zaten mevcut.")
+          path.write_text(text, encoding="utf-8")
+          print(text)
           PY
 
-          echo "AndroidManifest.xml:"
-          cat "$MANIFEST"
-
-          if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
-            echo "HATA: INTERNET izni eklenemedi."
-            exit 1
-          fi
-
       - name: Flutter paketlerini yukle
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter pub get
-
-      - name: Flutter temizle
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter clean
-
-      - name: Paketleri tekrar hazirla
         working-directory: ${{ steps.project.outputs.dir }}
         run: flutter pub get
 
@@ -149,31 +114,30 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.0.5 \
+            --build-name=1.0.6 \
             --build-number=${{ github.run_number }}
 
-      - name: APK dosyasini kontrol et
+      - name: APK kontrolu
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          echo "Olusturulan APK dosyalari:"
           ls -lah build/app/outputs/flutter-apk/
 
           if [ ! -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
-            echo "HATA: app-release.apk olusturulamadi."
+            echo "HATA: APK olusturulamadi."
             exit 1
           fi
 
-      - name: APK adini ELXVRO olarak degistir
+      - name: APK adini degistir
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           cp \
             build/app/outputs/flutter-apk/app-release.apk \
-            build/app/outputs/flutter-apk/ELXVRO-v1.0.5.apk
+            build/app/outputs/flutter-apk/ELXVRO-v1.0.6.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.0.5
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.0.5.apk
+          name: ELXVRO-APK-v1.0.6
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.0.6.apk
           if-no-files-found: error
           retention-days: 30
