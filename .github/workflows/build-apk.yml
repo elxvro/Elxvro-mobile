@@ -1,4 +1,4 @@
-name: ELXVRO v1.1.8 Wallpaper Resolve Fix APK Build
+name: ELXVRO v1.1.9 Wallpaper Resolve Fix APK Build
 
 on:
   workflow_dispatch:
@@ -218,9 +218,8 @@ jobs:
                           connection.instanceFollowRedirects = true
                           connection.connectTimeout = 12000
                           connection.readTimeout = 40000
-                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.8")
-                          connection.setRequestProperty("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-                          connection.setRequestProperty("Referer", "https://www.elxvro.com/")
+                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.9")
+                          connection.setRequestProperty("Accept", "image/*")
                           connection.connect()
                           if (connection.responseCode !in 200..299) {
                               throw IOException("Gorsel indirilemedi (HTTP ${connection.responseCode}).")
@@ -578,7 +577,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.1.8 \
+            --build-name=1.1.9 \
             --build-number=${{ github.run_number }}
 
       - name: APK imzasini dogrula
@@ -600,12 +599,12 @@ jobs:
           fi
 
           echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.8.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.9.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.1.8
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.8.apk
+          name: ELXVRO-APK-v1.1.9
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.9.apk
           if-no-files-found: error
           retention-days: 30
