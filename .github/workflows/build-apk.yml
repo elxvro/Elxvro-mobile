@@ -1,4 +1,4 @@
-name: ELXVRO v1.1.1 APK Build
+name: ELXVRO v1.1.2 APK Build
 
 on:
   workflow_dispatch:
@@ -113,7 +113,7 @@ jobs:
           import java.net.HttpURLConnection
           import java.net.URL
           import java.security.MessageDigest
-          import kotlin.math.min
+          import kotlin.math.max
           import kotlin.math.roundToInt
 
           class MainActivity : FlutterActivity() {
@@ -200,7 +200,7 @@ jobs:
                           connection.instanceFollowRedirects = true
                           connection.connectTimeout = 15000
                           connection.readTimeout = 45000
-                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.1")
+                          connection.setRequestProperty("User-Agent", "ELXVRO-Android/1.1.2")
                           connection.setRequestProperty("Accept", "image/*")
                           connection.connect()
                           if (connection.responseCode !in 200..299) {
@@ -248,11 +248,10 @@ jobs:
                   }
               }
 
-              private fun fitCenterToScreen(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
+              private fun centerCropToScreen(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
                   val output = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(output)
-                  canvas.drawColor(Color.BLACK)
-                  val scale = min(
+                  val scale = max(
                       targetWidth.toFloat() / source.width.toFloat(),
                       targetHeight.toFloat() / source.height.toFloat()
                   )
@@ -280,7 +279,7 @@ jobs:
                               ?: throw IOException("Gorsel Android tarafindan okunamadi.")
 
                           val (screenWidth, screenHeight) = getWallpaperViewportSize()
-                          fittedBitmap = fitCenterToScreen(sourceBitmap, screenWidth, screenHeight)
+                          fittedBitmap = centerCropToScreen(sourceBitmap, screenWidth, screenHeight)
                           val manager = WallpaperManager.getInstance(applicationContext)
                           val viewport = Rect(0, 0, screenWidth, screenHeight)
 
@@ -445,7 +444,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.1.1 \
+            --build-name=1.1.2 \
             --build-number=${{ github.run_number }}
 
       - name: APK imzasini dogrula
@@ -467,12 +466,12 @@ jobs:
           fi
 
           echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.1.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.1.2.apk
 
       - name: APK artifact olarak yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.1.1
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.1.apk
+          name: ELXVRO-APK-v1.1.2
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.1.2.apk
           if-no-files-found: error
           retention-days: 30
