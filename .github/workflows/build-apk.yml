@@ -1,4 +1,4 @@
-name: ELXVRO v1.4.2 Unified Account APK Build
+name: ELXVRO v1.5.0 Google Play Release Build
 
 on:
   workflow_dispatch:
@@ -60,6 +60,30 @@ jobs:
             --org=com.elxvro \
             --project-name=elxvro \
             .
+
+      - name: Android 16 SDK kur ve API 36 hedefle
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" >/dev/null || true
+          fi
+
+          python3 <<'PYAPI'
+          from pathlib import Path
+          import re
+
+          p = Path('android/app/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          text, c1 = re.subn(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', text)
+          text, c2 = re.subn(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', text)
+          if c1 != 1 or c2 != 1:
+              raise SystemExit(f'HATA: API 36 Gradle alanlari bulunamadi. compile={c1}, target={c2}')
+          p.write_text(text, encoding='utf-8')
+          print('compileSdk=36 ve targetSdk=36 uygulandi.')
+          PYAPI
 
       - name: Android izinlerini ekle
         working-directory: ${{ steps.project.outputs.dir }}
@@ -513,6 +537,14 @@ jobs:
           p.write_text(s, encoding='utf-8')
           PY
 
+      - name: Play release version code olustur
+        id: release_version
+        shell: bash
+        run: |
+          CODE=$((150000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "ELXVRO versionName=1.5.0 versionCode=$CODE"
+
       - name: Flutter paketlerini yukle
         working-directory: ${{ steps.project.outputs.dir }}
         run: flutter pub get
@@ -525,13 +557,40 @@ jobs:
         working-directory: ${{ steps.project.outputs.dir }}
         run: flutter test
 
-      - name: Release APK olustur
+      - name: Google Play AAB olustur
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter build appbundle \
+            --release \
+            --build-name=1.5.0 \
+            --build-number=${{ steps.release_version.outputs.code }}
+
+      - name: Test icin release APK olustur
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter build apk \
             --release \
-            --build-name=1.4.2 \
-            --build-number=${{ github.run_number }}
+            --build-name=1.5.0 \
+            --build-number=${{ steps.release_version.outputs.code }}
+
+      - name: AAB imzasini dogrula
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          test -f "$AAB" || { echo "HATA: AAB olusmadi"; exit 1; }
+          keytool -printcert -jarfile "$AAB" | tee /tmp/aab-cert.txt
+
+          EXPECTED_SHA1="6B:24:70:EB:30:85:61:A7:30:A0:CA:1B:CA:ED:64:9E:1F:7C:9C:4F"
+          ACTUAL_SHA1=$(sed -n 's/^[[:space:]]*SHA1: //p' /tmp/aab-cert.txt | head -n 1)
+          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "HATA: AAB beklenen upload keystore ile imzalanmadi"
+            echo "Beklenen: $EXPECTED_SHA1"
+            echo "Bulunan:  $ACTUAL_SHA1"
+            exit 1
+          fi
+          cp "$AAB" build/app/outputs/bundle/release/ELXVRO-v1.5.0.aab
 
       - name: APK imzasini dogrula
         working-directory: ${{ steps.project.outputs.dir }}
@@ -543,21 +602,24 @@ jobs:
           EXPECTED_SHA1_NORMALIZED="6b2470eb308561a730a0ca1bcaed649e1f7c9c4f"
           ACTUAL_SHA1_NORMALIZED=$(sed -n 's/.*certificate SHA-1 digest: //p' /tmp/apk-cert.txt | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
 
-          echo "Beklenen APK SHA-1: $EXPECTED_SHA1_NORMALIZED"
-          echo "Bulunan  APK SHA-1: $ACTUAL_SHA1_NORMALIZED"
-
           if [ "$ACTUAL_SHA1_NORMALIZED" != "$EXPECTED_SHA1_NORMALIZED" ]; then
-            echo "HATA: APK beklenen Google OAuth SHA-1 ile imzalanmadi"
+            echo "HATA: APK beklenen upload keystore ile imzalanmadi"
             exit 1
           fi
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.5.0.apk
 
-          echo "APK imzasi Google OAuth SHA-1 ile eslesiyor."
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.4.2.apk
-
-      - name: APK artifact olarak yukle
+      - name: Google Play AAB artifact yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.4.2
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.4.2.apk
+          name: ELXVRO-PLAY-AAB-v1.5.0
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/bundle/release/ELXVRO-v1.5.0.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Test APK artifact yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ELXVRO-APK-v1.5.0
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.5.0.apk
           if-no-files-found: error
           retention-days: 30
