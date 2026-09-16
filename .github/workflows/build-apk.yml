@@ -1,4 +1,4 @@
-name: ELXVRO v1.5.0 Google Play Release Build
+name: ELXVRO v1.6.0 Modern Release Build
 
 on:
   workflow_dispatch:
@@ -79,10 +79,11 @@ jobs:
           text = p.read_text(encoding='utf-8')
           text, c1 = re.subn(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', text)
           text, c2 = re.subn(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', text)
-          if c1 != 1 or c2 != 1:
-              raise SystemExit(f'HATA: API 36 Gradle alanlari bulunamadi. compile={c1}, target={c2}')
+          text, c3 = re.subn(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', text)
+          if c1 != 1 or c2 != 1 or c3 != 1:
+              raise SystemExit(f'HATA: API 36 / minSdk Gradle alanlari bulunamadi. compile={c1}, target={c2}, min={c3}')
           p.write_text(text, encoding='utf-8')
-          print('compileSdk=36 ve targetSdk=36 uygulandi.')
+          print('compileSdk=36, targetSdk=36 ve minSdk=24 uygulandi.')
           PYAPI
 
       - name: Android izinlerini ekle
@@ -175,6 +176,7 @@ jobs:
           import android.graphics.RectF
           import android.net.Uri
           import android.os.Build
+          import android.os.Bundle
           import android.util.DisplayMetrics
           import android.view.WindowManager
           import io.flutter.embedding.android.FlutterActivity
@@ -190,6 +192,14 @@ jobs:
           class MainActivity : FlutterActivity() {
               private val wallpaperChannelName = "com.elxvro/wallpaper"
               private val browserChannelName = "com.elxvro/browser"
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.setFlags(
+                      WindowManager.LayoutParams.FLAG_SECURE,
+                      WindowManager.LayoutParams.FLAG_SECURE
+                  )
+              }
           
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -543,7 +553,7 @@ jobs:
         run: |
           CODE=$((150000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "ELXVRO versionName=1.5.0 versionCode=$CODE"
+          echo "ELXVRO versionName=1.6.0 versionCode=$CODE"
 
       - name: Flutter paketlerini yukle
         working-directory: ${{ steps.project.outputs.dir }}
@@ -562,7 +572,7 @@ jobs:
         run: |
           flutter build appbundle \
             --release \
-            --build-name=1.5.0 \
+            --build-name=1.6.0 \
             --build-number=${{ steps.release_version.outputs.code }}
 
       - name: Test icin release APK olustur
@@ -570,7 +580,7 @@ jobs:
         run: |
           flutter build apk \
             --release \
-            --build-name=1.5.0 \
+            --build-name=1.6.0 \
             --build-number=${{ steps.release_version.outputs.code }}
 
       - name: AAB imzasini dogrula
@@ -590,7 +600,7 @@ jobs:
             echo "Bulunan:  $ACTUAL_SHA1"
             exit 1
           fi
-          cp "$AAB" build/app/outputs/bundle/release/ELXVRO-v1.5.0.aab
+          cp "$AAB" build/app/outputs/bundle/release/ELXVRO-v1.6.0.aab
 
       - name: APK imzasini dogrula
         working-directory: ${{ steps.project.outputs.dir }}
@@ -606,20 +616,20 @@ jobs:
             echo "HATA: APK beklenen upload keystore ile imzalanmadi"
             exit 1
           fi
-          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.5.0.apk
+          cp "$APK" build/app/outputs/flutter-apk/ELXVRO-v1.6.0.apk
 
       - name: Google Play AAB artifact yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-PLAY-AAB-v1.5.0
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/bundle/release/ELXVRO-v1.5.0.aab
+          name: ELXVRO-PLAY-AAB-v1.6.0
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/bundle/release/ELXVRO-v1.6.0.aab
           if-no-files-found: error
           retention-days: 30
 
       - name: Test APK artifact yukle
         uses: actions/upload-artifact@v4
         with:
-          name: ELXVRO-APK-v1.5.0
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.5.0.apk
+          name: ELXVRO-APK-v1.6.0
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.6.0.apk
           if-no-files-found: error
           retention-days: 30
