@@ -28,37 +28,66 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      - name: ELXVRO ZIP'i ac ve proje klasorunu bul
+      - name: ELXVRO ZIP dosyasini ac
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP_FILE="$(find . -maxdepth 1 -type f \( -iname 'elxvro-wallpaper-app.zip' -o -iname 'ELXVRO-Wallpaper-App-v1.zip' -o -iname '*.zip' \) | head -n 1)"
-
+          ZIP_FILE="$(find . -maxdepth 1 -type f \( -iname 'elxvro-wallpaper-app.zip' -o -iname 'ELXVRO-Wallpaper-App-v1*.zip' -o -iname '*.zip' \) | head -n 1)"
           if [ -z "${ZIP_FILE:-}" ]; then
-            echo "HATA: Repository ana dizininde ZIP dosyasi bulunamadi."
+            echo "HATA: Repository ana dizininde ELXVRO ZIP dosyasi bulunamadi."
             exit 1
           fi
 
-          rm -rf _elxvro_build
-          mkdir -p _elxvro_build
-          unzip -q "$ZIP_FILE" -d _elxvro_build
+          rm -rf _elxvro_source _elxvro_build
+          mkdir -p _elxvro_source
+          unzip -q "$ZIP_FILE" -d _elxvro_source
 
-          PUBSPEC="$(find _elxvro_build -type f -name pubspec.yaml | head -n 1)"
+          PUBSPEC="$(find _elxvro_source -type f -name pubspec.yaml | head -n 1)"
           if [ -z "${PUBSPEC:-}" ]; then
             echo "HATA: ZIP icinde pubspec.yaml bulunamadi."
             exit 1
           fi
 
-          PROJECT_DIR="$(dirname "$PUBSPEC")"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Flutter proje klasoru: $PROJECT_DIR"
+          SOURCE_DIR="$(dirname "$PUBSPEC")"
+          echo "SOURCE_DIR=$SOURCE_DIR" >> "$GITHUB_ENV"
+          echo "Kaynak proje: $SOURCE_DIR"
 
-      - name: Android proje dosyalarini tamamla
+      - name: Temiz Android Flutter projesi olustur
         shell: bash
         run: |
-          cd "$PROJECT_DIR"
-          flutter create . --platforms=android --org com.elxvro --project-name elxvro_wallpaper
+          set -euo pipefail
+          flutter create _elxvro_build \
+            --platforms=android \
+            --org com.elxvro \
+            --project-name wallpaper
+
+          rm -rf _elxvro_build/lib
+          cp -R "$SOURCE_DIR/lib" _elxvro_build/lib
+          cp "$SOURCE_DIR/pubspec.yaml" _elxvro_build/pubspec.yaml
+
+          rm -rf _elxvro_build/assets
+          cp -R "$SOURCE_DIR/assets" _elxvro_build/assets
+
+          # Native Android duvar kagidi entegrasyonunu temiz projeye aktar.
+          mkdir -p _elxvro_build/android/app/src/main/kotlin/com/elxvro/wallpaper
+          cp "$SOURCE_DIR/android/app/src/main/kotlin/com/elxvro/wallpaper/MainActivity.kt" \
+             _elxvro_build/android/app/src/main/kotlin/com/elxvro/wallpaper/MainActivity.kt
+          cp "$SOURCE_DIR/android/app/src/main/AndroidManifest.xml" \
+             _elxvro_build/android/app/src/main/AndroidManifest.xml
+
+          # Uygulama Android 7.0+ (API 24) hedefler; kilit ekrani wallpaper API'si icin gerekli.
+          if [ -f _elxvro_build/android/app/build.gradle.kts ]; then
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/' _elxvro_build/android/app/build.gradle.kts
+          fi
+          if [ -f _elxvro_build/android/app/build.gradle ]; then
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' _elxvro_build/android/app/build.gradle
+          fi
+
+          # flutter create'in varsayilan MyApp testini build analizine sokma.
+          rm -rf _elxvro_build/test
+
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/_elxvro_build" >> "$GITHUB_ENV"
 
       - name: Dependencies
         shell: bash
@@ -72,7 +101,7 @@ jobs:
           cd "$PROJECT_DIR"
           flutter analyze --no-fatal-infos
 
-      - name: Build release APK
+      - name: APK surumunu olustur
         shell: bash
         run: |
           cd "$PROJECT_DIR"
@@ -80,21 +109,21 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/ELXVRO.apk"
 
-      - name: Build release AAB
+      - name: AAB surumunu olustur
         shell: bash
         run: |
           cd "$PROJECT_DIR"
           flutter build appbundle --release
           cp build/app/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/dist/ELXVRO.aab"
 
-      - name: Upload APK
+      - name: APK artifact yukle
         uses: actions/upload-artifact@v7
         with:
           name: ELXVRO-APK
           path: dist/ELXVRO.apk
           if-no-files-found: error
 
-      - name: Upload AAB
+      - name: Google Play AAB artifact yukle
         uses: actions/upload-artifact@v7
         with:
           name: ELXVRO-AAB
