@@ -28,34 +28,75 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
+      - name: ELXVRO ZIP'i ac ve proje klasorunu bul
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f \( -iname 'elxvro-wallpaper-app.zip' -o -iname 'ELXVRO-Wallpaper-App-v1.zip' -o -iname '*.zip' \) | head -n 1)"
+
+          if [ -z "${ZIP_FILE:-}" ]; then
+            echo "HATA: Repository ana dizininde ZIP dosyasi bulunamadi."
+            exit 1
+          fi
+
+          rm -rf _elxvro_build
+          mkdir -p _elxvro_build
+          unzip -q "$ZIP_FILE" -d _elxvro_build
+
+          PUBSPEC="$(find _elxvro_build -type f -name pubspec.yaml | head -n 1)"
+          if [ -z "${PUBSPEC:-}" ]; then
+            echo "HATA: ZIP icinde pubspec.yaml bulunamadi."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Flutter proje klasoru: $PROJECT_DIR"
+
+      - name: Android proje dosyalarini tamamla
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          flutter create . --platforms=android --org com.elxvro --project-name elxvro_wallpaper
+
       - name: Dependencies
-        run: flutter pub get
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
 
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          flutter analyze --no-fatal-infos
 
       - name: Build release APK
-        run: flutter build apk --release
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build apk --release
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/ELXVRO.apk"
+
+      - name: Build release AAB
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build appbundle --release
+          cp build/app/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/dist/ELXVRO.aab"
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
           name: ELXVRO-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: dist/ELXVRO.apk
           if-no-files-found: error
 
-      - name: Google Play AAB artifact yukle
-        uses: actions/upload-artifact@v4
+      - name: Upload AAB
+        uses: actions/upload-artifact@v7
         with:
-          name: ELXVRO-PLAY-AAB-v1.6.0
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/bundle/release/ELXVRO-v1.6.0.aab
+          name: ELXVRO-AAB
+          path: dist/ELXVRO.aab
           if-no-files-found: error
-          retention-days: 30
-
-      - name: Test APK artifact yukle
-        uses: actions/upload-artifact@v4
-        with:
-          name: ELXVRO-APK-v1.6.0
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/ELXVRO-v1.6.0.apk
-          if-no-files-found: error
-          retention-days: 30
