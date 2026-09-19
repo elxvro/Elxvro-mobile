@@ -89,6 +89,115 @@ jobs:
 
           echo "PROJECT_DIR=$GITHUB_WORKSPACE/_elxvro_build" >> "$GITHUB_ENV"
 
+      - name: Release keystore hazirla
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ELXVRO_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ELXVRO_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          test -n "$KEYSTORE_PASSWORD" || { echo "HATA: ELXVRO_KEYSTORE_PASSWORD secret eksik"; exit 1; }
+          test -n "$KEYSTORE_B64" || { echo "HATA: ELXVRO_KEYSTORE_BASE64 secret eksik"; exit 1; }
+
+          python3 <<'PYBASE64'
+          import base64
+          import os
+          import re
+          from pathlib import Path
+
+          value = re.sub(r'\s+', '', os.environ['KEYSTORE_B64'].strip())
+          if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+              value = value[1:-1]
+          if ';base64,' in value:
+              value = value.split(';base64,', 1)[1]
+
+          try:
+              decoded = base64.b64decode(value, validate=True)
+          except Exception as exc:
+              raise SystemExit('HATA: ELXVRO_KEYSTORE_BASE64 gecerli Base64 degil.') from exc
+
+          if len(decoded) < 500:
+              raise SystemExit('HATA: Release keystore gecersiz veya eksik.')
+
+          target = Path('android/app/elxvro-release.jks')
+          target.write_bytes(decoded)
+          print(f'Release keystore hazir: {len(decoded)} bayt')
+          PYBASE64
+
+          ACTUAL_SHA1=$(keytool -list -v \
+            -keystore android/app/elxvro-release.jks \
+            -alias elxvro \
+            -storepass "$KEYSTORE_PASSWORD" \
+            | sed -n 's/^[[:space:]]*SHA1: //p' | head -n 1)
+
+          EXPECTED_SHA1="6B:24:70:EB:30:85:61:A7:30:A0:CA:1B:CA:ED:64:9E:1F:7C:9C:4F"
+          echo "Release keystore SHA-1: $ACTUAL_SHA1"
+          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "HATA: Release keystore SHA-1 Google OAuth kaydiyla eslesmiyor."
+            echo "Beklenen: $EXPECTED_SHA1"
+            echo "Bulunan:  $ACTUAL_SHA1"
+            exit 1
+          fi
+
+      - name: Android release signing ayarla
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ELXVRO_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEYSTORE_PASSWORD
+          keyAlias=elxvro
+          storeFile=elxvro-release.jks
+          EOF
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+
+          if kts.exists():
+              s = kts.read_text(encoding='utf-8')
+              imports = 'import java.util.Properties\nimport java.io.FileInputStream\n\n'
+              if 'import java.util.Properties' not in s:
+                  s = imports + s
+
+              setup = 'val keystoreProperties = Properties()\nval keystorePropertiesFile = rootProject.file("key.properties")\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n}\n\n'
+              if 'val keystoreProperties = Properties()' not in s:
+                  s = s.replace('android {', setup + 'android {', 1)
+
+              signing = '    signingConfigs {\n        create("release") {\n            keyAlias = keystoreProperties["keyAlias"] as String\n            keyPassword = keystoreProperties["keyPassword"] as String\n            storeFile = file(keystoreProperties["storeFile"] as String)\n            storePassword = keystoreProperties["storePassword"] as String\n        }\n    }\n\n'
+              if 'create("release")' not in s:
+                  s = s.replace('    buildTypes {', signing + '    buildTypes {', 1)
+
+              old = 'signingConfig = signingConfigs.getByName("debug")'
+              if old not in s:
+                  raise SystemExit('HATA: KTS debug signing satiri bulunamadi.')
+              s = s.replace(old, 'signingConfig = signingConfigs.getByName("release")', 1)
+              kts.write_text(s, encoding='utf-8')
+          elif groovy.exists():
+              s = groovy.read_text(encoding='utf-8')
+              setup = "def keystoreProperties = new Properties()\ndef keystorePropertiesFile = rootProject.file('key.properties')\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n}\n\n"
+              if 'def keystoreProperties = new Properties()' not in s:
+                  s = setup + s
+              signing = "    signingConfigs {\n        release {\n            keyAlias keystoreProperties['keyAlias']\n            keyPassword keystoreProperties['keyPassword']\n            storeFile file(keystoreProperties['storeFile'])\n            storePassword keystoreProperties['storePassword']\n        }\n    }\n\n"
+              if 'signingConfigs {' not in s:
+                  s = s.replace('    buildTypes {', signing + '    buildTypes {', 1)
+              old = 'signingConfig signingConfigs.debug'
+              if old not in s:
+                  raise SystemExit('HATA: Groovy debug signing satiri bulunamadi.')
+              s = s.replace(old, 'signingConfig signingConfigs.release', 1)
+              groovy.write_text(s, encoding='utf-8')
+          else:
+              raise SystemExit('HATA: Android app Gradle dosyasi bulunamadi.')
+          PY
+
       - name: Dependencies
         shell: bash
         run: |
@@ -104,10 +213,26 @@ jobs:
       - name: APK surumunu olustur
         shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
           flutter build apk --release
+
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$APK" || { echo "HATA: APK olusmadi"; exit 1; }
+
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/elxvro-apk-cert.txt
+
+          ACTUAL_SHA1=$(sed -n 's/.*certificate SHA-1 digest: //p' /tmp/elxvro-apk-cert.txt | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
+          EXPECTED_SHA1="6b2470eb308561a730a0ca1bcaed649e1f7c9c4f"
+          echo "APK SHA-1: $ACTUAL_SHA1"
+          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "HATA: APK Google OAuth icin beklenen release sertifikasi ile imzalanmadi."
+            exit 1
+          fi
+
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/ELXVRO.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/dist/ELXVRO.apk"
 
       - name: AAB surumunu olustur
         shell: bash
